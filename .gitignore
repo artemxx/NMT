@@ -1,2 +1,11 @@
-# some files automatically created by Jupyter Notebook
+# files automatically created by Jupyter Notebook
 .ipynb_checkpoints/
+
+# python files
+=1.3.0
+__pycache__/
+log
+
+# temporary data files
+bpe_rules*
+train.*
