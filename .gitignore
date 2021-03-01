@@ -9,3 +9,7 @@ log
 # temporary data files
 bpe_rules*
 train.*
+data.txt
+
+# other unused files
+*summary.py
