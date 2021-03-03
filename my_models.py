@@ -42,7 +42,7 @@ class BasicModel(nn.Module):
         inp_emb = self.emb_inp(inp)
         batch_size = inp.shape[0]
         
-        enc_seq, [last_state_but_not_really] = self.enc0(inp_emb)
+        enc_seq, last_state_but_not_really = self.enc0(inp_emb)
         # enc_seq: [batch, time, hid_size], last_state: [batch, hid_size]
         
         # last_state is not actually last because of padding, let's find the real last_state
@@ -95,40 +95,6 @@ class BasicModel(nn.Module):
             outputs.append(logits.argmax(dim=-1))
             all_states.append(state) 
         return torch.stack(outputs, dim=1), all_states
-
-    # def decode_inference_beam_search_slow(self, initial_state, beam_size, max_len=100, **flags):
-    #     batch_size, device = len(initial_state[0]), initial_state[0].device
-    #     outputs = []
-    #     for batch_idx in range(batch_size):
-    #         beam_seqs = [(self.out_voc.bos_ix,)]
-    #         state = initial_state
-    #         beam_states = [initial_state[0].unsqueeze(0)]
-    #         beam_probs = [0]
-
-    #         for _ in range(max_len):
-    #             new_seqs = []
-    #             states_history = []
-    #             new_probs = []
-
-    #             for seq, state, beam_prob in zip(beam_seqs, beam_states, beam_probs):
-    #                 prev_tokens = torch.tensor(seq, dtype=torch.int64, device=device).unsqueeze(0)
-    #                 new_state, logits = self.decode_step(state, prev_tokens)
-    #                 states_history.append(new_state)
-    #                 probs = torch.log_softmax(logits, dim=-1)[0].detach().cpu().numpy()
-    #                 for idx in np.argpartition(probs, -beam_size)[-beam_size:]:
-    #                     new_prob = beam_prob + probs[idx]
-    #                     new_seqs.append(seq + (idx,))
-    #                     new_probs.append(beam_prob + probs[idx])
-
-    #             beam_seqs, beam_states, beam_probs = [], [], []
-    #             for idx in np.argsort(new_probs)[-beam_size:]:
-    #                 beam_seqs.append(new_seqs[idx])
-    #                 beam_states.append(states_history[idx % beam_size])
-    #                 beam_probs.append(new_probs[idx])
-
-    #         outputs.append(beam_seqs[-1])
-
-    #     return outputs, None
     
     def decode_inference_beam_search(self, initial_state, beam_size, max_len=100, **flags):
         batch_size, device = len(initial_state[0]), initial_state[0].device
@@ -144,7 +110,6 @@ class BasicModel(nn.Module):
             states_history = []
             for i in range(len(outputs)):
                 prev_tokens = torch.tensor([tokens[-1] for tokens in outputs[i]], device=device)
-                # prev_tokens = (prev_tokens, dtype=torch.int64, )
 
                 cur_states, logits = self.decode_step(states[i], prev_tokens)
                 logits = torch.log_softmax(logits, dim=-1).detach().cpu().numpy()
@@ -167,7 +132,7 @@ class BasicModel(nn.Module):
 
         for i in range(len(hypos)):
             if not hypos[i]:
-                hypos[i].append([0, outputs[0]])
+                hypos[i].append([0, outputs[0][i]])
             hypos[i].sort()
         return [hypo[-1][1] for hypo in hypos]
 
@@ -234,15 +199,26 @@ class AttentionLayer(nn.Module):
     
     
 class AttentiveModel(BasicModel):
-    def __init__(self, inp_voc, out_voc, emb_size=256, hid_size=256, attn_size=256):
+    def __init__(self, inp_voc, out_voc, emb_size=256, hid_size=256, attn_size=256,
+                 rnn_type='GRU', bid=False):
         """ 
         Translation model that uses attention. See instructions above. 
         """
         
         super().__init__(inp_voc, out_voc, emb_size, hid_size)
-    
-        self.dec0 = nn.GRUCell(emb_size + hid_size, hid_size)
-        self.attn = AttentionLayer(hid_size, hid_size, attn_size)
+
+        if rnn_type == 'RNN':
+            self.enc0 = nn.RNN(emb_size, hid_size, batch_first=True, bidirectional=bid)
+        elif rnn_type == 'GRU':
+            self.enc0 = nn.GRU(emb_size, hid_size, batch_first=True, bidirectional=bid)
+        elif rnn_type == 'LSTM':
+            self.enc0 = nn.LSTM(emb_size, hid_size, batch_first=True, bidirectional=bid)
+        else:
+            raise RuntimeError('Unknown RNN type: %s' % rnn_type)
+
+        self.dec_start = nn.Linear(hid_size + hid_size * bid, hid_size)
+        self.dec0 = nn.GRUCell(emb_size + hid_size + hid_size * bid, hid_size)
+        self.attn = AttentionLayer(hid_size + hid_size * bid, hid_size, attn_size)
 
 
     def encode(self, inp, **flags):
@@ -254,7 +230,7 @@ class AttentiveModel(BasicModel):
 
         inp_emb = self.emb_inp(inp)
         
-        enc_seq, [last_state_but_not_really] = self.enc0(inp_emb)
+        enc_seq, last_state_but_not_really = self.enc0(inp_emb)
         
         [dec_start] = super().encode(inp, **flags)    
         
