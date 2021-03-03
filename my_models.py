@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from copy import deepcopy
 
 
 class BasicModel(nn.Module):
@@ -94,58 +95,90 @@ class BasicModel(nn.Module):
             outputs.append(logits.argmax(dim=-1))
             all_states.append(state) 
         return torch.stack(outputs, dim=1), all_states
+
+    # def decode_inference_beam_search_slow(self, initial_state, beam_size, max_len=100, **flags):
+    #     batch_size, device = len(initial_state[0]), initial_state[0].device
+    #     outputs = []
+    #     for batch_idx in range(batch_size):
+    #         beam_seqs = [(self.out_voc.bos_ix,)]
+    #         state = initial_state
+    #         beam_states = [initial_state[0].unsqueeze(0)]
+    #         beam_probs = [0]
+
+    #         for _ in range(max_len):
+    #             new_seqs = []
+    #             states_history = []
+    #             new_probs = []
+
+    #             for seq, state, beam_prob in zip(beam_seqs, beam_states, beam_probs):
+    #                 prev_tokens = torch.tensor(seq, dtype=torch.int64, device=device).unsqueeze(0)
+    #                 new_state, logits = self.decode_step(state, prev_tokens)
+    #                 states_history.append(new_state)
+    #                 probs = torch.log_softmax(logits, dim=-1)[0].detach().cpu().numpy()
+    #                 for idx in np.argpartition(probs, -beam_size)[-beam_size:]:
+    #                     new_prob = beam_prob + probs[idx]
+    #                     new_seqs.append(seq + (idx,))
+    #                     new_probs.append(beam_prob + probs[idx])
+
+    #             beam_seqs, beam_states, beam_probs = [], [], []
+    #             for idx in np.argsort(new_probs)[-beam_size:]:
+    #                 beam_seqs.append(new_seqs[idx])
+    #                 beam_states.append(states_history[idx % beam_size])
+    #                 beam_probs.append(new_probs[idx])
+
+    #         outputs.append(beam_seqs[-1])
+
+    #     return outputs, None
     
     def decode_inference_beam_search(self, initial_state, beam_size, max_len=100, **flags):
-        """ Generate translations from model (greedy version) """
-
         batch_size, device = len(initial_state[0]), initial_state[0].device
         state = initial_state
 
-        outputs = [[(self.out_voc.bos_ix, )] * batch_size for _ in range(beam_size)] # [beam, batch]
+        outputs = [[(self.out_voc.bos_ix,)] * batch_size]
         probs = np.zeros(shape=(beam_size, batch_size))
-        states = [initial_state.copy() for _ in range(beam_size)]
-        all_states = [[initial_state.copy()] for _ in range(beam_size)]
+        states = [deepcopy(initial_state) for _ in range(beam_size)]
+        hypos = [[] for _ in range(batch_size)]
 
         for _ in range(max_len):
-            # next_beams[i] = beam_size items with shape [token_seq, prob]
             next_beams = [[] for _ in range(batch_size)] 
             states_history = []
-            for i in range(beam_size):
-                prev_tokens = [tokens[-1] for tokens in outputs[i]]
-                prev_tokens = torch.tensor(prev_tokens, dtype=torch.int64, device=device)
+            for i in range(len(outputs)):
+                prev_tokens = torch.tensor([tokens[-1] for tokens in outputs[i]], device=device)
+                # prev_tokens = (prev_tokens, dtype=torch.int64, )
 
                 cur_states, logits = self.decode_step(states[i], prev_tokens)
-                logits = nn.Softmax(dim=-1)(logits)
-                logits = torch.log(logits)
+                logits = torch.log_softmax(logits, dim=-1).detach().cpu().numpy()
                 states_history.append(cur_states)
 
-                for b, logit in enumerate(logits.detach().cpu().numpy()):
-                    token_seq = outputs[i][b]
-                    prob = probs[i, b]
-                    inds = np.argpartition(logit, -beam_size)
-                    for idx in inds[-beam_size:]:
-                        next_beams[b].append([token_seq + (idx,), logit[idx] + prob, i])
-
+                for b, logit in enumerate(logits):
+                    for idx in np.argpartition(logit, -beam_size)[-beam_size:]:
+                        if idx == 1 and np.exp(logit[idx]) < 0.6:
+                            idx = 228
+                        next_beams[b].append([outputs[i][b] + (idx,), logit[idx] + probs[i, b], i])
+         
+            outputs = [[None] * batch_size for _ in range(beam_size)]
             for i in range(batch_size):
-                d = {x[0]: x for x in next_beams[i]}
-                next_beams[i] = list(d.values())
                 next_beams[i].sort(key=lambda x: x[1], reverse=True)
-
                 for j in range(beam_size):
                     outputs[j][i], probs[j, i], beam_idx = next_beams[i][j]
+                    if outputs[j][i][-1] == 1:
+                        hypos[i].append([probs[j, i] + 0.1 * _, outputs[j][i]])
                     states[j][0][i] = states_history[beam_idx][0][i]
-            for i in range(beam_size):
-                all_states[i].append(states[i])
-        return torch.tensor(outputs[0]), all_states[0]
-    
+
+        for i in range(len(hypos)):
+            if not hypos[i]:
+                hypos[i].append([0, outputs[0]])
+            hypos[i].sort()
+        return [hypo[-1][1] for hypo in hypos]
+
     def translate_lines(self, inp_lines, device, beam_size=None, **kwargs):
         inp = self.inp_voc.to_matrix(inp_lines).to(device)
         initial_state = self.encode(inp)
         if beam_size is None:
             out_ids, states = self.decode_inference(initial_state, **kwargs)
         else:
-            out_ids, states = self.decode_inference_beam_search(initial_state, beam_size, **kwargs)
-        return self.out_voc.to_lines(out_ids.cpu().numpy()), states
+            out_ids, states = self.decode_inference_beam_search(initial_state, beam_size, **kwargs), None
+        return self.out_voc.to_lines(out_ids), states
   
 
 class AttentionLayer(nn.Module):
