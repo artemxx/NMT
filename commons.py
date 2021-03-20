@@ -30,14 +30,16 @@ def compute_loss(model, inp, out, **flags):
     return -logp_out[mask].mean()
 
 
-def compute_bleu(model, inp_lines, out_lines, bpe_sep='@@ ', **flags):
+def compute_bleu(model, inp_lines, out_lines, bpe_sep='@@ ', batch_size=64, **flags):
     """
     Estimates corpora-level BLEU score of model's translations given inp and reference out
     Note: if you're serious about reporting your results, use https://pypi.org/project/sacrebleu
     """
     device = next(model.parameters()).device
     with torch.no_grad():
-        translations, _ = model.translate_lines(inp_lines, device, **flags)
+        translations = []
+        for i in range(0, len(inp_lines), batch_size):
+            translations.extend(model.translate_lines(inp_lines[i:i+batch_size], device, **flags)[0])
         translations = [line.replace(bpe_sep, '') for line in translations]
         actual = [line.replace(bpe_sep, '') for line in out_lines]
         return corpus_bleu(
