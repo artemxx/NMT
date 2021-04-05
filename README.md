@@ -1,3 +1,5 @@
+## This repo contains some research at NMT models & approaches
+
 ### Materials
 * Stanford lecture on seq2seq and MT (english) - [video](https://www.youtube.com/watch?v=IxQtK2SjWWM)
 * YSDA materials (russian): [lecture](https://yadi.sk/i/CX1M4cKnTuC3kg), [seminar](https://yadi.sk/i/1pSImQdxA1_eaw), [lecture slides](https://drive.google.com/file/d/1inle88uyRI-a3ghxdVrqhhmukqywb3Hy/view?usp=sharing) 
