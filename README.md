@@ -15,5 +15,9 @@
   * MSCOCO captioning [challenge](http://mscoco.org/dataset/#captions-challenge2015)
   * Captioning baseline [notebook](https://github.com/yandexdataschool/Practical_DL/tree/fall18/week07_seq2seq)
 
+### Policy gradient methods
+* YSDA Reinforcement Learning course [materials](https://github.com/yandexdataschool/Practical_RL/tree/master/week06_policy_based)
+* Self-critical sequence training [paper](https://arxiv.org/abs/1612.00563)
+
 ### More on Transformer
 * Illustrated transformer [post](https://jalammar.github.io/illustrated-transformer/)
