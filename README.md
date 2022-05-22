@@ -1,4 +1,4 @@
-## This repo contains some research at NMT (Neural Machine Translation) models & approaches
+## This repo contains some research at NMT & ASR models & approaches
 
 ### Materials
 * MT from Yandex Translate - [materials](https://github.com/yandexdataschool/nlp_course/tree/2020/week09_mt)
